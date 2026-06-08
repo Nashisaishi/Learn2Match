@@ -1,0 +1,131 @@
+# Reproducible commands to regenerate the paper figures.
+# Three experiment groups: small market with noise, small market without noise, and large market with noise.
+# Each group runs in three stages: CA-ETC baseline, multi-seed PPO train+eval, then aggregated CI / learning-curve plots.
+
+### multi seed multi environment
+# with noise, small market
+# Stage 0: CA-ETC baseline
+JAX_PLATFORMS=cuda CUDA_VISIBLE_DEVICES=0 \
+python learn2match/ca-etc-hirerl/plot_batched_ca_etc_baseline.py \
+    --Nw 5 --Nf 5 --d 3 --horizon 200 \
+    --num_seeds 32 \
+    --sigma_interview 1 --sigma_match 0.6 --lambda_reveal 1 \
+    --non_negative_features --outside_option=-1e9 \
+    --unified_seeds \
+    --seed 1 --run_name ca_etc_noise \
+    --out_dir /home/hisaishi/hireRL/eval_runs/ca_etc_noise
+
+# Stage 1: PPO multi-seed (10 train × 10 eval)
+JAX_PLATFORMS=cuda \
+python learn2match/examples/run_multiseed.py \
+    --num_train_seeds 10 --gpus 0,1 \
+    --base_run_name ppo_multiseed_noise \
+    --eval_root /home/hisaishi/hireRL/eval_runs/ppo_multiseed_noise \
+    --Nw 5 --Nf 5 --d 3 --num_periods 200 \
+    --sigma_interview 1 --sigma_match 0.6 --lambda_reveal 1 \
+    --non_negative_features --outside_option=-1e9 \
+    --use_rnn --entropy_coef 0.05 \
+    --total_env_steps 1000000 --num_envs 128 \
+    --num_eval_envs 32 --eval_seed 0
+
+### learning curve
+cd /home/hisaishi/hireRL
+python learn2match/examples/plot_multiseed_learning_curves.py \
+    --plots_dir learn2match/examples/plots \
+    --base_run_name ppo_multiseed_may6 \
+    --num_seeds 10 \
+    --out_dir learn2match/graph/learning_curves
+
+
+# Stage 2: graph together
+python learn2match/examples/plot_multiseed_ci.py \
+    --ppo_eval_root /home/hisaishi/hireRL/eval_runs/ppo_multiseed_noise \
+    --num_seeds 10 \
+    --ca_etc_dir /home/hisaishi/hireRL/eval_runs/ca_etc_noise \
+    --gauge committed \
+    --out_dir /home/hisaishi/hireRL/eval_runs/ppo_multiseed_noise/aggregated
+
+
+
+
+
+
+###########################################
+# no noise
+# Stage 0: CA-ETC baseline
+JAX_PLATFORMS=cuda CUDA_VISIBLE_DEVICES=0 \
+python learn2match/ca-etc-hirerl/plot_batched_ca_etc_baseline.py \
+    --Nw 5 --Nf 5 --d 3 --horizon 200 \
+    --num_seeds 32 \
+    --sigma_interview 0.000001 --sigma_match 0 --lambda_reveal 100 \
+    --non_negative_features --outside_option=-1e9 \
+    --unified_seeds \
+    --seed 1 --run_name ca_etc_no_noise \
+    --out_dir /home/hisaishi/hireRL/eval_runs/ca_etc_no_noise
+
+# Stage 1: PPO multi-seed
+JAX_PLATFORMS=cuda \
+python learn2match/examples/run_multiseed.py \
+    --num_train_seeds 10 --gpus 0,1 \
+    --base_run_name ppo_multiseed_no_noise \
+    --eval_root /home/hisaishi/hireRL/eval_runs/ppo_multiseed_no_noise \
+    --Nw 5 --Nf 5 --d 3 --num_periods 200 \
+    --sigma_interview 0.000001 --sigma_match 0 --lambda_reveal 100 \
+    --non_negative_features --outside_option=-1e9 \
+    --use_rnn --entropy_coef 0.05 \
+    --total_env_steps 1000000 --num_envs 128 \
+    --num_eval_envs 32 --eval_seed 0
+
+# Stage 2: graph together
+python learn2match/examples/plot_multiseed_ci.py \
+    --ppo_eval_root /home/hisaishi/hireRL/eval_runs/ppo_multiseed_no_noise \
+    --num_seeds 10 \
+    --ca_etc_dir /home/hisaishi/hireRL/eval_runs/ca_etc_no_noise \
+    --gauge committed \
+    --out_dir /home/hisaishi/hireRL/eval_runs/ppo_multiseed_no_noise/aggregated
+
+
+
+
+
+## large market
+### multi seed multi environment
+# with noise
+# Stage 0: CA-ETC baseline
+JAX_PLATFORMS=cuda CUDA_VISIBLE_DEVICES=0 \
+python learn2match/ca-etc-hirerl/plot_batched_ca_etc_baseline.py \
+    --Nw 20 --Nf 20 --d 5 --horizon 600 \
+    --num_seeds 32 \
+    --sigma_interview 1 --sigma_match 0.6 --lambda_reveal 1 \
+    --non_negative_features --outside_option=-1e9 \
+    --unified_seeds \
+    --seed 1 --run_name ca_etc_noise_large \
+    --out_dir /home/hisaishi/hireRL/eval_runs/ca_etc_noise_large
+
+# Stage 1: PPO multi-seed
+JAX_PLATFORMS=cuda JAX_COMPILATION_CACHE_DIR=/home/hisaishi/.cache/jax/multiseed \
+python learn2match/examples/run_multiseed.py \
+    --num_train_seeds 10 --gpus 0,1 \
+    --base_run_name ppo_multiseed_noise_large \
+    --eval_root /home/hisaishi/hireRL/eval_runs/ppo_multiseed_noise_large \
+    --Nw 20 --Nf 20 --d 5 --num_periods 600 \
+    --sigma_interview 1 --sigma_match 0.6 --lambda_reveal 1 \
+    --non_negative_features --outside_option=-1e9 \
+    --use_rnn --entropy_coef 0.05 \
+    --total_env_steps 1500000 --num_envs 128 \
+    --num_eval_envs 32 --eval_seed 0
+
+# Stage 2a: cumulative metrics CI
+python learn2match/examples/plot_multiseed_ci.py \
+    --ppo_eval_root /home/hisaishi/hireRL/eval_runs/ppo_multiseed_noise_large \
+    --num_seeds 10 \
+    --ca_etc_dir /home/hisaishi/hireRL/eval_runs/ca_etc_noise_large \
+    --gauge committed \
+    --out_dir /home/hisaishi/hireRL/eval_runs/ppo_multiseed_noise_large/aggregated
+
+# Stage 2b: learning curves
+python learn2match/examples/plot_multiseed_learning_curves.py \
+    --plots_dir learn2match/examples/plots \
+    --base_run_name ppo_multiseed_noise_large \
+    --num_seeds 10 \
+    --out_dir learn2match/graph/learning_curves_large
