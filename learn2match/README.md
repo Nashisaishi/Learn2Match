@@ -18,14 +18,23 @@ learn2match/
 
 ## Dependencies
 
-- Python ≥ 3.10, JAX (with CUDA for training), Flax, NumPy, Matplotlib, Pandas, tqdm, wandb
-- **`jax_pbt/`** must live at the repo root, as a sibling of `learn2match/`. The environment imports `jax_pbt.env.*`, `jax_pbt.controller.ippo_controller`, etc.
+- Python ≥ 3.10. Other deps are listed in [`requirements.txt`](../requirements.txt) at the repo root.
+- **`jax_pbt/`** must live at the repo root, as a sibling of `learn2match/`. The environment imports `jax_pbt.env.*`, `jax_pbt.controller.ippo_controller`, etc. (Already included if you clone this repo.)
+
+## Install
+
+```bash
+git clone https://github.com/Nashisaishi/Learn2Match.git
+cd Learn2Match
+pip install -r requirements.txt
+# For GPU training, additionally install the matching JAX CUDA wheel — see the comment in requirements.txt.
+```
 
 ## Quick start
 
-All commands run from the repo root.
+All commands run from the repo root (`Learn2Match/`).
 
-**Train a single PPO policy:**
+**1. Train a PPO policy.** Writes a checkpoint to `learn2match/examples/checkpoints/<run_name>.pkl`:
 ```bash
 python learn2match/examples/train_hirerl_ippo.py \
     --Nw 5 --Nf 5 --d 3 --horizon 200 \
@@ -33,7 +42,7 @@ python learn2match/examples/train_hirerl_ippo.py \
     --seed 0 --run_name my_run
 ```
 
-**Evaluate a checkpoint:**
+**2. Evaluate that checkpoint.** Requires the `.pkl` from step 1:
 ```bash
 python learn2match/examples/eval_and_plot.py \
     --ppo_ckpt learn2match/examples/checkpoints/my_run.pkl \
@@ -41,7 +50,7 @@ python learn2match/examples/eval_and_plot.py \
     --num_seeds 32 --run_name my_run_eval
 ```
 
-**Run the CA-ETC baseline (vmapped over seeds):**
+**Independent: run the CA-ETC baseline (vmapped over seeds):**
 ```bash
 python learn2match/ca-etc-hirerl/plot_batched_ca_etc_baseline.py --help
 ```

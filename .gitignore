@@ -1,0 +1,15 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.ipynb_checkpoints/
+
+# Local artifacts
+.DS_Store
+*.swp
+
+# Run outputs
+wandb/
+eval_runs/
+.jax_cache/
+learn2match/examples/checkpoints/
+learn2match/examples/plots/

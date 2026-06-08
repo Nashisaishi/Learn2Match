@@ -1,0 +1,14 @@
+# Python dependencies for Learn2Match.
+# Tested with Python >= 3.10.
+
+# JAX: for GPU training, install the CUDA wheel matching your system, e.g.
+#   pip install --upgrade "jax[cuda12]" -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
+# For CPU-only experiments the plain `jax` wheel below is enough.
+jax>=0.4.20
+flax>=0.8.0
+
+numpy>=1.24
+matplotlib>=3.7
+pandas>=2.0
+tqdm>=4.65
+wandb>=0.16
