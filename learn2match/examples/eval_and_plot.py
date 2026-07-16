@@ -89,7 +89,7 @@ def load_ppo_ckpt(env, ckpt_path):
         ActorCriticPPOAgent as PPOAgent,
         ActorCriticPPOTrainer as PPOTrainer,
     )
-    from hirerl import MaskedSharedActorCriticModel
+    from hirerl import PerCandidateActorCriticModel
 
     with open(ckpt_path, "rb") as f:
         ckpt = pickle.load(f)
@@ -104,8 +104,8 @@ def load_ppo_ckpt(env, ckpt_path):
 
     obs_w, obs_f = env.get_observation_space()
     act_w, act_f = env.get_action_space()
-    worker_model = MaskedSharedActorCriticModel.build(obs_w, act_w, hidden_size=hidden_size, use_rnn=use_rnn)
-    firm_model   = MaskedSharedActorCriticModel.build(obs_f, act_f, hidden_size=hidden_size, use_rnn=use_rnn)
+    worker_model = PerCandidateActorCriticModel.build(obs_w, act_w, hidden_size=hidden_size, use_rnn=use_rnn)
+    firm_model   = PerCandidateActorCriticModel.build(obs_f, act_f, hidden_size=hidden_size, use_rnn=use_rnn)
 
     # Trainer hyperparameters don't affect inference; defaults are fine for deserialization.
     ppo_kwargs = dict(

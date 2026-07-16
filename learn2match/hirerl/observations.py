@@ -91,6 +91,7 @@ def build_worker_observation_space(
         "hat_y": ContinuousSpace((Nf * d,), low=-10.0, high=10.0),
         "cumulative_tenure": ContinuousSpace((Nf,), low=0.0, high=1e6),
         "current_tenure": ContinuousSpace((Nf,), low=0.0, high=1e6),
+        "retention_candidate": ContinuousSpace((Nf,), low=0.0, high=1.0),
         "last_reward": ContinuousSpace((1,), low=-1e6, high=1e6),
         "action_mask": ContinuousSpace((num_worker_choices,), low=0.0, high=1.0),
     }
@@ -115,6 +116,7 @@ def build_firm_observation_space(
         "hat_x": ContinuousSpace((Nw * d,), low=-10.0, high=10.0),
         "cumulative_tenure": ContinuousSpace((Nw,), low=0.0, high=1e6),
         "current_tenure": ContinuousSpace((Nw,), low=0.0, high=1e6),
+        "retention_candidate": ContinuousSpace((Nw,), low=0.0, high=1.0),
         "last_reward": ContinuousSpace((1,), low=-1e6, high=1e6),
         "action_mask": ContinuousSpace((num_firm_choices,), low=0.0, high=1.0),
     }
@@ -145,6 +147,13 @@ def build_worker_observation(
     cum_ten = state.cumulative_tenure.astype(jnp.float32)
     cur_ten = state.current_tenure.astype(jnp.float32)
     last_r = state.last_reward_w[:, None]
+    # Who the RETENTION decision is about: the union of the committed match
+    # and the tentative match formed at MATCH_RESPOND. Outside the window
+    # between MATCH_RESPOND and RETENTION, tentative_matched is empty, so this
+    # equals the own_match information and reveals nothing new. At RETENTION it
+    # additionally identifies a just-formed tentative partner, which own_match
+    # does not show.
+    retention_cand = (state.matched | state.tentative_matched).astype(jnp.float32)  # (Nw, Nf)
 
     masks_all = worker_action_masks_all_phases(
         state, Nw, Nf, interview_mode, num_worker_choices,
@@ -161,6 +170,7 @@ def build_worker_observation(
         "hat_y": hat_y_flat,
         "cumulative_tenure": cum_ten,
         "current_tenure": cur_ten,
+        "retention_candidate": retention_cand,
         "last_reward": last_r,
         "action_mask": mask,
     }
@@ -199,6 +209,8 @@ def build_firm_observation(
     cum_ten = state.cumulative_tenure.T.astype(jnp.float32)                          # (Nf, Nw)
     cur_ten = state.current_tenure.T.astype(jnp.float32)                             # (Nf, Nw)
     last_r = state.last_reward_f[:, None]
+    # See build_worker_observation for semantics; firm side is the transpose.
+    retention_cand = (state.matched | state.tentative_matched).T.astype(jnp.float32)  # (Nf, Nw)
 
     masks_all = firm_action_masks_all_phases(
         state, Nw, Nf, interview_mode, num_firm_choices,
@@ -216,6 +228,7 @@ def build_firm_observation(
         "hat_x": hat_x_flat,
         "cumulative_tenure": cum_ten,
         "current_tenure": cur_ten,
+        "retention_candidate": retention_cand,
         "last_reward": last_r,
         "action_mask": mask,
     }

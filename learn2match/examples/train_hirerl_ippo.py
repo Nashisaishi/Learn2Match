@@ -30,7 +30,7 @@ from jax_pbt.policy.actor_critic import (
 from jax_pbt.trainer.ppo import PPOTransition
 from jax_pbt.utils import pytree_repeat_stack, rng_batch_split
 
-from hirerl import HireRLConfig, HireRLEnv, MaskedSharedActorCriticModel
+from hirerl import HireRLConfig, HireRLEnv, PerCandidateActorCriticModel
 from hirerl.metrics import compute_all_metrics
 
 from eval_and_plot import build_stateful_rollout_fn, compute_planner_welfare
@@ -221,10 +221,10 @@ class HireRLController(IPPOController):
         worker_obs_space, firm_obs_space = self.batched_env.get_observation_space()
         worker_act_space, firm_act_space = self.batched_env.get_action_space()
 
-        self.worker_model = MaskedSharedActorCriticModel.build(
+        self.worker_model = PerCandidateActorCriticModel.build(
             worker_obs_space, worker_act_space, hidden_size=args.hidden_size, use_rnn=args.use_rnn
         )
-        self.firm_model = MaskedSharedActorCriticModel.build(
+        self.firm_model = PerCandidateActorCriticModel.build(
             firm_obs_space, firm_act_space, hidden_size=args.hidden_size, use_rnn=args.use_rnn
         )
 

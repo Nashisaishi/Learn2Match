@@ -15,7 +15,7 @@ from .constants import (
     VISIBILITY_MATCHING_PAIRS,
 )
 from .env import HireRLEnv
-from .model import MaskedSharedActorCritic, MaskedSharedActorCriticModel
+from .model import PerCandidateActorCritic, PerCandidateActorCriticModel
 from .state import HireRLConst, HireRLState
 
 __all__ = [
@@ -23,8 +23,8 @@ __all__ = [
     "HireRLConst",
     "HireRLEnv",
     "HireRLState",
-    "MaskedSharedActorCritic",
-    "MaskedSharedActorCriticModel",
+    "PerCandidateActorCritic",
+    "PerCandidateActorCriticModel",
     "INTERVIEW_PROPOSE",
     "INTERVIEW_RESPOND",
     "MATCH_PROPOSE",

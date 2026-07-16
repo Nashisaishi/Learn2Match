@@ -35,7 +35,7 @@ from jax_pbt.policy.actor_critic import (
 from jax_pbt.trainer.ppo import PPOTransition
 from jax_pbt.utils import pytree_repeat_stack, rng_batch_split
 
-from hirerl import HireRLConfig, HireRLEnv, MaskedSharedActorCriticModel
+from hirerl import HireRLConfig, HireRLEnv, PerCandidateActorCriticModel
 from hirerl.constants import (
     INTERVIEW_PROPOSE,
     INTERVIEW_RESPOND,
@@ -296,8 +296,8 @@ def test_ppo_one_update():
     worker_obs_space, firm_obs_space = bench.get_observation_space()
     worker_act_space, firm_act_space = bench.get_action_space()
 
-    worker_model = MaskedSharedActorCriticModel.build(worker_obs_space, worker_act_space, hidden_size=32)
-    firm_model = MaskedSharedActorCriticModel.build(firm_obs_space, firm_act_space, hidden_size=32)
+    worker_model = PerCandidateActorCriticModel.build(worker_obs_space, worker_act_space, hidden_size=32)
+    firm_model = PerCandidateActorCriticModel.build(firm_obs_space, firm_act_space, hidden_size=32)
 
     common = dict(
         feature_shared=True, lr=3e-4, grad_clip_norm=1.0,
@@ -356,9 +356,11 @@ def test_ppo_one_update():
     )
     assert "loss" in optim_info_lst[0]
     assert "loss" in optim_info_lst[1]
+    # optim_info leaves have shape (ppo_epochs,); newer jax forbids float()
+    # on size-1 arrays, so reduce explicitly.
     print(
-        f"[OK] PPO update (worker loss={float(optim_info_lst[0]['loss']):.3f}, "
-        f"firm loss={float(optim_info_lst[1]['loss']):.3f})"
+        f"[OK] PPO update (worker loss={float(optim_info_lst[0]['loss'].mean()):.3f}, "
+        f"firm loss={float(optim_info_lst[1]['loss'].mean()):.3f})"
     )
 
 
