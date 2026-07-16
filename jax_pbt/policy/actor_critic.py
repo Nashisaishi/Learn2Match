@@ -27,7 +27,7 @@ class BaseActor(nn.Module):
         self.policy_layers = build_action_distribution_layer(self.action_space)
     
     def __call__(self, rnn_states: jax.Array, obs: Observation) -> tuple[jax.Array, ActionDistribution]:
-        rnn_states, feature = self.feature_extractor(rnn_states, obs)
+        rnn_states, feature, _ = self.feature_extractor(rnn_states, obs)
         pi = ActionDistribution({
             action_name: policy_layer(feature)
             for action_name, policy_layer in self.policy_layers.items()
@@ -47,7 +47,7 @@ class BaseCritic(nn.Module):
         self.value_layer = nn.Dense(1)
     
     def __call__(self, rnn_states: jax.Array, obs: Observation) -> tuple[jax.Array, jax.Array]:
-        rnn_states, feature = self.feature_extractor(rnn_states, obs)
+        rnn_states, feature, _ = self.feature_extractor(rnn_states, obs)
         val = self.value_layer(feature)
         return rnn_states, val.squeeze(-1)
     
@@ -68,7 +68,7 @@ class BaseSharedActorCritic(nn.Module):
         self.value_layer = nn.Dense(1)
     
     def __call__(self, rnn_states: jax.Array, obs: Observation) -> tuple[jax.Array, ActionDistribution, jax.Array]:
-        rnn_states, feature = self.feature_extractor(rnn_states, obs)
+        rnn_states, feature, _ = self.feature_extractor(rnn_states, obs)
         actor_feature = self.actor_feature_extractor(feature)
         pi = ActionDistribution({
             action_name: policy_layer(actor_feature)

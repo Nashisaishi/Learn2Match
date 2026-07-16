@@ -88,7 +88,7 @@ def build_worker_observation_space(
         "incoming_interview_proposals": ContinuousSpace((Nf,), low=0.0, high=1.0),
         "outgoing_interview_proposals": ContinuousSpace((Nf,), low=0.0, high=1.0),
         "interviewed_firms": ContinuousSpace((Nf,), low=0.0, high=1.0),
-        "hat_y": ContinuousSpace((Nf * d,), low=-10.0, high=10.0),
+        "hat_y": ContinuousSpace((Nf, d), low=-10.0, high=10.0),
         "cumulative_tenure": ContinuousSpace((Nf,), low=0.0, high=1e6),
         "current_tenure": ContinuousSpace((Nf,), low=0.0, high=1e6),
         "last_reward": ContinuousSpace((1,), low=-1e6, high=1e6),
@@ -112,7 +112,7 @@ def build_firm_observation_space(
         "outgoing_interview_proposals": ContinuousSpace((Nw,), low=0.0, high=1.0),
         "incoming_match_proposals": ContinuousSpace((Nw,), low=0.0, high=1.0),
         "interviewed_workers": ContinuousSpace((Nw,), low=0.0, high=1.0),
-        "hat_x": ContinuousSpace((Nw * d,), low=-10.0, high=10.0),
+        "hat_x": ContinuousSpace((Nw, d), low=-10.0, high=10.0),
         "cumulative_tenure": ContinuousSpace((Nw,), low=0.0, high=1e6),
         "current_tenure": ContinuousSpace((Nw,), low=0.0, high=1e6),
         "last_reward": ContinuousSpace((1,), low=-1e6, high=1e6),
@@ -141,7 +141,7 @@ def build_worker_observation(
     incoming = (state.interview_proposals_f_to_w[None, :] == arange_w[:, None]).astype(jnp.float32)  # (Nw, Nf)
     outgoing = (state.interview_proposals_w_to_f[:, None] == arange_f[None, :]).astype(jnp.float32)  # (Nw, Nf)
     interviewed = state.interviewed.astype(jnp.float32)
-    hat_y_flat = state.hat_y.reshape(Nw, Nf * d)
+    hat_y_kept = state.hat_y   # (Nw, Nf, d): keep the firm axis as a set dimension
     cum_ten = state.cumulative_tenure.astype(jnp.float32)
     cur_ten = state.current_tenure.astype(jnp.float32)
     last_r = state.last_reward_w[:, None]
@@ -158,7 +158,7 @@ def build_worker_observation(
         "incoming_interview_proposals": incoming,
         "outgoing_interview_proposals": outgoing,
         "interviewed_firms": interviewed,
-        "hat_y": hat_y_flat,
+        "hat_y": hat_y_kept,
         "cumulative_tenure": cum_ten,
         "current_tenure": cur_ten,
         "last_reward": last_r,
@@ -195,7 +195,7 @@ def build_firm_observation(
     incoming_match = (state.match_proposals_w_to_f[None, :] == arange_f[:, None]).astype(jnp.float32)  # (Nf, Nw)
     interviewed_workers = state.interviewed.T.astype(jnp.float32)                    # (Nf, Nw)
 
-    hat_x_flat = jnp.transpose(state.hat_x, (1, 0, 2)).reshape(Nf, Nw * d)           # (Nf, Nw*d)
+    hat_x_kept = jnp.transpose(state.hat_x, (1, 0, 2))                               # (Nf, Nw, d): keep the worker axis as a set dimension
     cum_ten = state.cumulative_tenure.T.astype(jnp.float32)                          # (Nf, Nw)
     cur_ten = state.current_tenure.T.astype(jnp.float32)                             # (Nf, Nw)
     last_r = state.last_reward_f[:, None]
@@ -213,7 +213,7 @@ def build_firm_observation(
         "outgoing_interview_proposals": outgoing,
         "incoming_match_proposals": incoming_match,
         "interviewed_workers": interviewed_workers,
-        "hat_x": hat_x_flat,
+        "hat_x": hat_x_kept,
         "cumulative_tenure": cum_ten,
         "current_tenure": cur_ten,
         "last_reward": last_r,
