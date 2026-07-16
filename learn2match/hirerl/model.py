@@ -70,7 +70,14 @@ class MaskedSharedActorCritic(nn.Module):
         # need not match), then concatenate along the last axis.
         h_b = jnp.broadcast_to(h[..., None, :], firm_emb.shape[:-1] + h.shape[-1:])
         firm_scores = self.scorer(jnp.concatenate([h_b, firm_emb], axis=-1)).squeeze(-1)
-        logits = jnp.concatenate([firm_scores, self.extra_head(h)], axis=-1)
+        # Logit order MUST match the env/action-mask layout, which is
+        # [NOOP, partner_0, ..., partner_{N-1}] (see hirerl/action_masks.py:
+        # index 0 is the NOOP slot, indices 1..N are the per-partner choices).
+        # So the flat extra head (NOOP) goes FIRST, then the per-element scores.
+        # Concatenating the scores first would shift every logit by one relative
+        # to the mask, decoding each partner score as the wrong partner and
+        # mis-masking NOOP -- which cripples learning.
+        logits = jnp.concatenate([self.extra_head(h), firm_scores], axis=-1)
         mask = obs[MASK_KEY].astype(jnp.bool_)
         masked_logits = jnp.where(mask, logits, LARGE_NEG)
         pi = ActionDistribution({ACTION_KEY: Categorical(logits=masked_logits)})
