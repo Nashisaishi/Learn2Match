@@ -174,6 +174,16 @@ def get_args() -> argparse.Namespace:
                         help="Also save a *_best.pkl whenever eval metric (default: "
                              "social_welfare mean) reaches a new high. Final *.pkl is "
                              "still saved at end-of-training as before.")
+    parser.add_argument("--save_all_checkpoints", action="store_true",
+                        help="Save a checkpoint at EVERY eval point, tagged "
+                             "*_step{env_step}.pkl, in addition to the final "
+                             "*.pkl. The step tags line up 1:1 with the "
+                             "learning-curve npz snapshots, so any point on the "
+                             "curve (e.g. the low-regret 'good point' before a "
+                             "divergence) can be reloaded for post-hoc analysis. "
+                             "Requires --metric_log_every_env_steps > 0 (no-op "
+                             "otherwise). Each file is small (~1-2 MB at N=100); "
+                             "a 1.5M-step run writes ~26 per seed.")
     parser.add_argument("--best_metric", type=str, default="social_welfare",
                         help="Which eval metric (key in eval_stats) to track for "
                              "--save_best_ckpt. Default: social_welfare.")
@@ -485,6 +495,11 @@ class HireRLController(IPPOController):
     def run(self) -> None:
         rng, trainer_state_lst, agent_state_lst, env_state, obs_lst = self.init_run_state(self.rng)
 
+        if self.args.save_all_checkpoints and self.eval_rollout is None:
+            print("[warn] --save_all_checkpoints has no effect: eval is off "
+                  "(--metric_log_every_env_steps <= 0), so there are no eval "
+                  "points to checkpoint at.")
+
         env_step = 0
         last_log = 0
         last_eval = 0
@@ -523,6 +538,11 @@ class HireRLController(IPPOController):
                 if (self.eval_rollout is not None and
                         env_step - last_eval >= self.args.metric_log_every_env_steps):
                     last_eval = env_step
+                    # Every-eval checkpoint (tagged by step), so the policy at
+                    # any snapshot on the learning curve can be reloaded later.
+                    # Step tags match the metric_buffer / npz snapshots 1:1.
+                    if self.args.save_all_checkpoints and self.args.ckpt_dir:
+                        self._save_checkpoint(trainer_state_lst, suffix=f"_step{env_step}")
                     t_eval = time.perf_counter()
                     eval_stats, eval_raw = self._run_eval(trainer_state_lst)
                     eval_wall = time.perf_counter() - t_eval
