@@ -116,6 +116,27 @@ def get_args() -> argparse.Namespace:
              "match between training and eval -- mismatched flags shift the "
              "obs distribution and degrade the policy OOD.",
     )
+    parser.add_argument(
+        "--interview_mode", type=str, default="exclusive_role",
+        choices=["exclusive_role", "capacity_limited"],
+        help="Interview matching protocol. 'exclusive_role' (default): an agent "
+             "that proposes an interview cannot also accept one the same step, "
+             "so each interview needs one proposer + one non-proposing accepter. "
+             "'capacity_limited': drops that constraint (a proposer may also "
+             "accept), capped by the per-step interview capacity. Use "
+             "capacity_limited to test whether the exclusive-role constraint is "
+             "what drives the 'everyone proposes -> no interviews form' deadlock "
+             "at scale. Should match between training and eval.",
+    )
+    parser.add_argument(
+        "--init_from_ckpt", type=str, default="",
+        help="Warm-start: load worker/firm trainer states (params + optimizer "
+             "moments) from this checkpoint instead of random init, then keep "
+             "training. Architecture flags (--hidden_size, --use_rnn) and env "
+             "shapes (Nw/Nf/d) must match the checkpoint. Use to test whether a "
+             "low-regret 'good point' checkpoint is an unstable attractor -- "
+             "i.e. whether continued training drifts back into collapse.",
+    )
 
     # Training
     parser.add_argument("--total_env_steps", type=int, default=int(1e6))
@@ -216,6 +237,7 @@ class HireRLController(IPPOController):
             noisy_hat_init=args.noisy_hat_init,
             sigma_init=args.sigma_init,
             public_retention_signal=args.public_retention_signal,
+            interview_mode=args.interview_mode,
             # Training cycle discards env info, so the 3 DA fori_loops inside
             # compute_all_metrics are pure waste here. The separate eval_env
             # built below keeps the default True for its info-consuming path.
@@ -419,6 +441,7 @@ class HireRLController(IPPOController):
             noisy_hat_init=self.args.noisy_hat_init,
             sigma_init=self.args.sigma_init,
             public_retention_signal=self.args.public_retention_signal,
+            interview_mode=self.args.interview_mode,
         )
         eval_env = HireRLEnv(eval_config)
         rollout_single = build_stateful_rollout_fn(
@@ -494,6 +517,17 @@ class HireRLController(IPPOController):
 
     def run(self) -> None:
         rng, trainer_state_lst, agent_state_lst, env_state, obs_lst = self.init_run_state(self.rng)
+
+        if self.args.init_from_ckpt:
+            import pickle
+            from flax import serialization
+            with open(self.args.init_from_ckpt, "rb") as f:
+                ck = pickle.load(f)
+            trainer_state_lst = [
+                serialization.from_bytes(trainer_state_lst[0], ck["worker_trainer_state"]),
+                serialization.from_bytes(trainer_state_lst[1], ck["firm_trainer_state"]),
+            ]
+            print(f"Warm-started worker/firm trainer states from {self.args.init_from_ckpt}")
 
         if self.args.save_all_checkpoints and self.eval_rollout is None:
             print("[warn] --save_all_checkpoints has no effect: eval is off "
@@ -707,6 +741,7 @@ class HireRLController(IPPOController):
                 "noisy_hat_init": self.args.noisy_hat_init,
                 "sigma_init": self.args.sigma_init,
                 "public_retention_signal": self.args.public_retention_signal,
+                "interview_mode": self.args.interview_mode,
             },
         }
         with open(path, "wb") as f:
