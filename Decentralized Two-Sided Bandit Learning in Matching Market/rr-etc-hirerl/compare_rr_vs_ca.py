@@ -104,6 +104,13 @@ def main():
                          "env-sampled features; forces d=1 and injects the "
                          "same market into both baselines")
     ap.add_argument("--outdir", type=str, default="compare_out")
+    # W&B (same conventions as plot_batched_ca_etc_baseline.py: on by
+    # default, --no-wandb to skip). Curves are downsampled to <= ~5000
+    # logged steps so a 150k-period run uploads in seconds.
+    ap.add_argument("--no-wandb", action="store_true")
+    ap.add_argument("--wandb-entity", default="haijingzong-university-of-washington")
+    ap.add_argument("--wandb-project", default="hireRL")
+    ap.add_argument("--run-name", default=None)
     args = ap.parse_args()
 
     if args.gap_floor:
@@ -226,6 +233,63 @@ def main():
               f"RR-ETC {s['rr_final_mean']:.0f} ± {s['rr_final_std']:.0f}   "
               f"CA-ETC {s['ca_final_mean']:.0f} ± {s['ca_final_std']:.0f}")
     print(f"[compare] outputs in {outdir}/")
+
+    if not args.no_wandb:
+        _log_wandb(args, outdir, t_axis, curves, stats, rr_hist)
+
+
+def _log_wandb(args, outdir: Path, t_axis, curves, stats, rr_hist):
+    """Upload curves + figure + summary to W&B.
+
+    Never lets a W&B failure (missing login, no network) destroy a finished
+    run — local CSV/PNG outputs are already on disk by the time this runs.
+    """
+    from datetime import datetime
+    try:
+        import wandb
+
+        run_name = args.run_name or (
+            f"rr-vs-ca-{args.Nw}x{args.Nf}-h{args.horizon}-N{args.num_seeds}-"
+            f"seed{args.seed}-{datetime.now():%Y%m%d-%H%M%S}"
+        )
+        run = wandb.init(
+            entity=args.wandb_entity,
+            project=args.wandb_project,
+            name=run_name,
+            config={"algorithm": "rr_etc_vs_ca_etc_paired", **vars(args)},
+        )
+
+        T = len(t_axis)
+        stride = max(1, T // 5000)
+        idxs = list(range(0, T, stride))
+        if idxs[-1] != T - 1:
+            idxs.append(T - 1)
+        series = {}
+        for side, (rr_c, ca_c) in curves.items():
+            series[f"rr/cum_regret_{side}_mean"] = rr_c.mean(axis=0)
+            series[f"rr/cum_regret_{side}_std"] = rr_c.std(axis=0)
+            series[f"ca/cum_regret_{side}_mean"] = ca_c.mean(axis=0)
+            series[f"ca/cum_regret_{side}_std"] = ca_c.std(axis=0)
+        for i in idxs:
+            wandb.log({k: float(v[i]) for k, v in series.items()},
+                      step=int(t_axis[i]))
+
+        wandb.log({"compare_cumregret": wandb.Image(
+            str(outdir / "compare_cumregret.png"))})
+        run.summary.update({
+            "rr_n_all_settled": int(rr_hist["n_all_settled"]),
+            "rr_n_correct": int(rr_hist["n_correct"]),
+            **{f"final/{side}_{algo}_{stat}": stats[side][f"{algo}_final_{stat}"]
+               for side in ("worker", "firm")
+               for algo in ("rr", "ca")
+               for stat in ("mean", "std")},
+        })
+        wandb.finish()
+        print(f"[compare] W&B run uploaded: {run_name}")
+    except Exception as e:                                    # noqa: BLE001
+        print(f"[compare] WARNING: W&B upload failed ({e!r}); "
+              f"local outputs in {outdir}/ are unaffected. "
+              f"Re-run with --no-wandb to silence this.")
 
 
 def _plot(outdir: Path, t, curves, args):
