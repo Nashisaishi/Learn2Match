@@ -358,6 +358,14 @@ def main():
              "value used at training time.",
     )
     parser.add_argument(
+        "--interview_mode", type=str, default="exclusive_role",
+        choices=["exclusive_role", "capacity_limited"],
+        help="Interview matching protocol. Must match the value used at "
+             "training time -- a mismatched protocol changes the action "
+             "masks and interview dynamics, so the policy is evaluated "
+             "out-of-distribution.",
+    )
+    parser.add_argument(
         "--hat_init_value", type=float, default=0.0,
         help="Optimistic init for hat_x and hat_y at episode reset. Default "
              "0.0 reproduces the historical pessimistic init. Should match "
@@ -397,7 +405,7 @@ def main():
                         help="Base seed; per-seed rollouts use seed + i for i in 0..num_seeds-1.")
     parser.add_argument("--num_seeds", type=int, default=32,
                         help="Number of independent eval rollouts to run sequentially. "
-                             "Aggregates (mean / 95% CI) are reported across these seeds.")
+                             "Aggregates (mean / 95%% CI) are reported across these seeds.")
     parser.add_argument("--wandb_entity", default="haijingzong-university-of-washington")
     parser.add_argument("--wandb_project", default="hireRL")
     parser.add_argument("--run_name", default=None)
@@ -430,6 +438,7 @@ def main():
         noisy_hat_init=args.noisy_hat_init,
         sigma_init=args.sigma_init,
         public_retention_signal=args.public_retention_signal,
+        interview_mode=args.interview_mode,
     )
     env = HireRLEnv(config)
 

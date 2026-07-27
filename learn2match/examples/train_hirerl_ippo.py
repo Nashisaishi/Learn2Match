@@ -34,6 +34,7 @@ from hirerl import HireRLConfig, HireRLEnv, PerCandidateActorCriticModel
 from hirerl.metrics import compute_all_metrics
 
 from eval_and_plot import build_stateful_rollout_fn, compute_planner_welfare
+from value_clipped_trainer import ValueClippedActorCriticPPOTrainer as ValueClippedPPOTrainer
 
 
 def get_args() -> argparse.Namespace:
@@ -157,6 +158,19 @@ def get_args() -> argparse.Namespace:
     parser.add_argument("--gamma", type=float, default=0.997)
     parser.add_argument("--gae_lam", type=float, default=0.95)
     parser.add_argument("--ratio_clip", type=float, default=0.2)
+    parser.add_argument(
+        "--value_clip", type=float, default=None,
+        help="Enable PPO value clipping with this threshold (default None = "
+             "off). Bounds how far the critic may move from its rollout-time "
+             "prediction in one update: v_clipped = v_old + clip(v - v_old, "
+             "-c, c), loss = max((v-target)^2, (v_clipped-target)^2). Uses "
+             "value_clipped_trainer.ValueClippedActorCriticPPOTrainer, because "
+             "jax_pbt's built-in value_clip clips around target_val instead of "
+             "v_old, which makes its max() degenerate to the unclipped loss "
+             "(i.e. it is a no-op). Watch worker/val_clip_fraction in the npz: "
+             "near 0 means the threshold never binds, near 1 means the critic "
+             "is frozen. Threshold is in value units, not normalized.",
+    )
     parser.add_argument("--entropy_coef", type=float, default=0.01)
     parser.add_argument("--val_loss_coef", type=float, default=0.5)
     parser.add_argument("--grad_clip_norm", type=float, default=1.0)
@@ -278,12 +292,17 @@ class HireRLController(IPPOController):
             gae_lam=args.gae_lam,
             ppo_epochs=args.ppo_epochs,
             ratio_clip=args.ratio_clip,
+            value_clip=args.value_clip,
             chunk_length=args.chunk_length,
             num_minibatches=args.num_minibatches,
             minibatch_num_chunks=minibatch_num_chunks,
         )
-        self.worker_trainer = PPOTrainer(actor_critic_fn=self.worker_model, **common_kwargs)
-        self.firm_trainer = PPOTrainer(actor_critic_fn=self.firm_model, **common_kwargs)
+        # jax_pbt's own value_clip is a no-op (it clips around target_val, so the
+        # max() always returns the unclipped loss). When clipping is requested,
+        # use the subclass that clips around the rollout-time prediction.
+        trainer_cls = PPOTrainer if args.value_clip is None else ValueClippedPPOTrainer
+        self.worker_trainer = trainer_cls(actor_critic_fn=self.worker_model, **common_kwargs)
+        self.firm_trainer = trainer_cls(actor_critic_fn=self.firm_model, **common_kwargs)
 
         # Stateless PPOAgent objects are reused for both train rollouts (built
         # inside init_train) and eval rollouts (build_stateful_rollout_fn).
@@ -305,6 +324,9 @@ class HireRLController(IPPOController):
         # Each entry = {"env_step", "metrics": {key: {mean, std, ci_lo, ci_hi}},
         #               "raw": {key: ndarray(num_episodes, num_periods)}}.
         self.metric_buffer: list[dict] = []
+        # PPO optimization stats, one entry per ~5k-env-step logging point.
+        # Written into the learning-curve npz under optim_* keys.
+        self.optim_buffer: list[dict] = []
 
     def get_train_env_const_step(self) -> PyTreeNode:
         return pytree_repeat_stack(self.env_fn.default_const, (self.num_envs,))
@@ -559,6 +581,21 @@ class HireRLController(IPPOController):
                     self.log(env_step, train_info_lst[1], log_prefix="firm")
                     self.log(env_step, optim_info_lst[0], log_prefix="worker")
                     self.log(env_step, optim_info_lst[1], log_prefix="firm")
+                    # Also buffer the optimization stats (grad_norm, val_loss,
+                    # pi_loss, entropy, ...) so they land in the learning-curve
+                    # npz. Without this they exist only in W&B, and a run made
+                    # with W&B off loses them entirely -- which blocks any
+                    # post-hoc "did the optimizer blow up at the collapse?"
+                    # analysis. Values are per-PPO-epoch arrays; keep every
+                    # epoch rather than their mean, since a blow-up in a single
+                    # epoch is exactly what averaging would hide.
+                    self.optim_buffer.append({
+                        "env_step": env_step,
+                        **{f"{side}/{k}": np.asarray(v, dtype=np.float64).ravel()
+                           for side, oi in (("worker", optim_info_lst[0]),
+                                            ("firm", optim_info_lst[1]))
+                           for k, v in oi.items()},
+                    })
                     metrics = compute_all_metrics(
                         jax.tree_util.tree_map(lambda x: x[0], env_state),
                         outside=self.config.outside_option,
@@ -712,8 +749,35 @@ class HireRLController(IPPOController):
             key: np.stack([m["raw"][key] for m in self.metric_buffer], axis=0)
             for key in self.eval_metric_keys
         }
+        # PPO optimization stats on their own (finer) step grid, prefixed
+        # optim_ so they never collide with an eval metric name. Lets a
+        # post-hoc analysis line grad_norm / val_loss up against the regret
+        # curve without needing W&B.
+        # Each buffered value is a per-PPO-epoch array, so a stacked metric has
+        # shape (num_cycles, ppo_epochs) -- take .max(1) for spikes, .mean(1)
+        # for trends. Missing keys are filled with NaN of the right width so a
+        # metric that only exists in some configs (e.g. val_clip_fraction) still
+        # stacks cleanly.
+        optim_arrays = {}
+        if self.optim_buffer:
+            optim_arrays["optim_env_steps"] = np.array(
+                [o["env_step"] for o in self.optim_buffer], dtype=np.int64
+            )
+            keys = {k for o in self.optim_buffer for k in o if k != "env_step"}
+            for key in sorted(keys):
+                width = next(
+                    (np.asarray(o[key]).size for o in self.optim_buffer if key in o), 1
+                )
+                optim_arrays[f"optim_{key.replace('/', '_')}"] = np.stack(
+                    [
+                        np.asarray(o[key], dtype=np.float64).ravel()
+                        if key in o else np.full(width, np.nan)
+                        for o in self.optim_buffer
+                    ],
+                    axis=0,
+                )
         npz_path = os.path.join(out_dir, f"{self.args.run_name}_learning_curve.npz")
-        np.savez(npz_path, env_steps=steps, **raw_arrays)
+        np.savez(npz_path, env_steps=steps, **raw_arrays, **optim_arrays)
         print(f"Saved learning curve raw data to {npz_path}")
 
     def _save_checkpoint(self, trainer_state_lst, suffix: str = "") -> None:

@@ -76,6 +76,7 @@ def _build_train_cmd(args: argparse.Namespace, seed: int, run_name: str) -> List
         "--sigma_match", str(args.sigma_match),
         "--lambda_reveal", str(args.lambda_reveal),
         f"--outside_option={args.outside_option}",
+        "--interview_mode", args.interview_mode,
         "--num_envs", str(args.num_envs),
         "--total_env_steps", str(args.total_env_steps),
         "--metric_log_every_env_steps", str(args.metric_log_every_env_steps),
@@ -131,6 +132,7 @@ def _build_eval_cmd(
         "--sigma_match", str(args.sigma_match),
         "--lambda_reveal", str(args.lambda_reveal),
         f"--outside_option={args.outside_option}",
+        "--interview_mode", args.interview_mode,
         "--hat_init_value", str(args.hat_init_value),
         "--sigma_init", str(args.sigma_init),
         "--num_seeds", str(args.num_eval_envs),
@@ -250,6 +252,12 @@ def main() -> None:
     parser.add_argument("--sigma_match", type=float, default=0.6)
     parser.add_argument("--lambda_reveal", type=float, default=1.0)
     parser.add_argument("--outside_option", type=float, default=-1e9)
+    parser.add_argument(
+        "--interview_mode", type=str, default="exclusive_role",
+        choices=["exclusive_role", "capacity_limited"],
+        help="Interview matching protocol; forwarded to BOTH the training "
+             "subprocesses and the final eval_and_plot.py so the eval env "
+             "always matches the training env.")
     parser.add_argument("--non_negative_features", action="store_true")
     parser.add_argument("--allow_on_the_job_search", action="store_true")
     parser.add_argument("--noisy_hat_init", action="store_true")

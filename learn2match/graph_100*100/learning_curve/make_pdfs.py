@@ -48,7 +48,7 @@ mpl.rcParams.update({
 # Used to convert per-period quantities to cumulative-over-T quantities so the
 # regret panels match the \sum_{t=1}^T(...) form in the CA-ETC-style bound.
 # If you re-run with a different --num_periods, update this constant.
-T_PERIODS = 600
+T_PERIODS = 800
 
 # (csv_filename, pdf_filename, ylabel, title, scale) -- kept in plot order.
 # ``scale`` multiplies all four CSV columns (ppo_mean / ppo_std / ppo_ci_lo /
