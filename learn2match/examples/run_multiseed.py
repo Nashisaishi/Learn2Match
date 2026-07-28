@@ -67,7 +67,7 @@ _EVAL_SCRIPT = _HERE / "eval_and_plot.py"
 
 def _build_train_cmd(args: argparse.Namespace, seed: int, run_name: str) -> List[str]:
     cmd = [
-        sys.executable, str(_TRAIN_SCRIPT),
+        sys.executable, str(args.train_script),
         "--Nw", str(args.Nw),
         "--Nf", str(args.Nf),
         "--d", str(args.d),
@@ -105,6 +105,10 @@ def _build_train_cmd(args: argparse.Namespace, seed: int, run_name: str) -> List
         cmd.append("--noisy_hat_init")
     if args.public_retention_signal:
         cmd.append("--public_retention_signal")
+    if args.save_all_checkpoints:
+        cmd.append("--save_all_checkpoints")
+    if args.save_best_ckpt:
+        cmd += ["--save_best_ckpt", "--best_metric", args.best_metric]
     if not args.no_wandb_train:
         cmd += [
             "--wandb_entity", args.wandb_entity,
@@ -217,9 +221,33 @@ def main() -> None:
     parser.add_argument("--base_run_name", type=str, required=True,
                         help="Prefix for run_name; checkpoints land at "
                              "{ckpt_dir}/{base_run_name}_s{i}.pkl.")
+    parser.add_argument("--train_script", type=str, default=str(_TRAIN_SCRIPT),
+                        help="Per-seed training script. Defaults to "
+                             "train_hirerl_ippo.py (unchanged behaviour). Set to "
+                             "learn2match/mappo-hirerl/train_hirerl_mappo.py to run "
+                             "MAPPO through this same train->eval pipeline: it takes "
+                             "the identical env/eval flags and writes "
+                             "IPPO-compatible ckpts and learning-curve npz, so the "
+                             "eval and aggregation stages need no changes. Careful: "
+                             "--minibatch_size counts env-timesteps there, not "
+                             "per-agent samples; divide the IPPO value by the "
+                             "per-role agent count (e.g. 16384 -> 160 at Nw=100).")
     parser.add_argument("--ckpt_dir", type=str,
                         default=str(_HERE / "checkpoints"),
                         help="Where train_hirerl_ippo.py writes ckpts.")
+    parser.add_argument("--save_all_checkpoints", action="store_true",
+                        help="Forwarded to the training script: also write a "
+                             "{run_name}_step{N}.pkl at every eval point, not "
+                             "just the final ckpt. Lets a long run be resumed "
+                             "or rolled back to a pre-divergence snapshot. Costs "
+                             "roughly (total_env_steps / metric_log_every_env_"
+                             "steps) files per seed.")
+    parser.add_argument("--save_best_ckpt", action="store_true",
+                        help="Forwarded to the training script: keep a "
+                             "{run_name}_best.pkl at the best --best_metric "
+                             "eval so far.")
+    parser.add_argument("--best_metric", type=str, default="social_welfare",
+                        help="Metric tracked by --save_best_ckpt.")
     parser.add_argument("--eval_root", type=str, required=True,
                         help="Root dir for eval outputs; per-seed subdirs are "
                              "{eval_root}/seed{i}.")

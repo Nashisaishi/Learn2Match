@@ -361,8 +361,42 @@ class HireRLMAPPOController(HireRLController):
         print(f"Saved MAPPO checkpoint to {path}")
 
 
+def _validate_minibatch(args: argparse.Namespace) -> None:
+    """Fail fast, and legibly, on an IPPO-unit --minibatch_size.
+
+    The sampling unit here is the env-timestep (all Nw + Nf agents of an env
+    travel together, because the critic input is that env's whole pair grid).
+    Passing the IPPO value -- which counts per-agent samples and is therefore
+    ~N times larger -- otherwise dies with a ZeroDivisionError deep inside
+    split_into_minibatch, after the JIT compile has already been paid for.
+    """
+    if args.minibatch_size is None:
+        return
+    chunks = (args.rollout_length // args.chunk_length) * args.num_envs
+    want = args.minibatch_size // args.chunk_length
+    if want < 1:
+        raise SystemExit(
+            f"--minibatch_size {args.minibatch_size} is smaller than "
+            f"--chunk_length {args.chunk_length}; it must cover at least one chunk."
+        )
+    if want > chunks:
+        per_role = max(args.Nw, args.Nf)
+        raise SystemExit(
+            f"--minibatch_size {args.minibatch_size} env-timesteps needs {want} "
+            f"chunks, but this rollout only has {chunks} "
+            f"(rollout_length {args.rollout_length} / chunk_length "
+            f"{args.chunk_length} x num_envs {args.num_envs}).\n"
+            f"NOTE MAPPO counts ENV-TIMESTEPS here, while train_hirerl_ippo.py "
+            f"counts PER-AGENT samples -- each env-timestep already carries all "
+            f"{args.Nw + args.Nf} agents. To match an IPPO run, divide its value "
+            f"by the per-role agent count: {args.minibatch_size} / {per_role} = "
+            f"{args.minibatch_size // per_role}."
+        )
+
+
 def main() -> None:
     args = get_args()
+    _validate_minibatch(args)
     HireRLMAPPOController(args).run()
 
 
