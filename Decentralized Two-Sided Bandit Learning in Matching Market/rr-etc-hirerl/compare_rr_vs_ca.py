@@ -276,6 +276,13 @@ def _log_wandb(args, outdir: Path, t_axis, curves, stats, rr_hist):
 
         wandb.log({"compare_cumregret": wandb.Image(
             str(outdir / "compare_cumregret.png"))})
+        # Attach the full-resolution outputs to the run (Files tab) — the
+        # logged curves above are downsampled, these are the exact data.
+        for fname in ("cumulative_worker_regret.csv",
+                      "cumulative_firm_regret.csv", "summary.json"):
+            p = outdir / fname
+            if p.exists():
+                wandb.save(str(p), base_path=str(outdir), policy="now")
         run.summary.update({
             "rr_n_all_settled": int(rr_hist["n_all_settled"]),
             "rr_n_correct": int(rr_hist["n_correct"]),
