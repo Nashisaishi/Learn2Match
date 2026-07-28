@@ -1,0 +1,284 @@
+import os
+import warnings
+from functools import partial
+from typing import Dict, Literal, Optional, Tuple
+
+import jax
+import jax.numpy as jnp
+
+with open(os.devnull, "w") as _devnull:
+    import sys as _sys
+
+    _sys.stdout, _sys.stderr = _devnull, _devnull
+    try:
+        from brax import envs
+    finally:
+        _sys.stdout, _sys.stderr = _sys.__stdout__, _sys.__stderr__
+from jaxtyping import PRNGKeyArray
+
+from jaxmarl.environments import spaces
+from jaxmarl.environments.multi_agent_env import (
+    Actions,
+    Dones,
+    Infos,
+    MultiAgentEnv,
+    Observations,
+    Rewards,
+)
+
+from .mappings import _agent_action_mapping, _agent_observation_mapping
+
+# TODO: move homogenisation to a separate wrapper
+
+
+class MABraxEnv(MultiAgentEnv):
+    def __init__(
+        self,
+        env_name: str,
+        episode_length: int = 1000,
+        action_repeat: int = 1,
+        auto_reset: bool = True,
+        homogenisation_method: Optional[Literal["max", "concat"]] = None,
+        backend: str = "positional",
+        agent_obs_mapping: Dict | None = None,
+        agent_action_mapping: Dict | None = None,
+        **kwargs,
+    ):
+        """Multi-Agent Brax environment.
+
+        Args:
+            env_name: Name of the environment to be used. Expected to be of the format
+                `<NAME>_<ID>`, where name corresponds to the underlying brax envirornment
+                name (e.g. `ant`) and the id corresponds to a specific multi-agent mapping
+                (i.e. 4x2). See `mappings.py` for supported env names.
+
+                ID can be omitted if agent_obs_mapping and agent_action_mapping
+                are provided, allowing for custom multi-agent configurations.
+            episode_length: Length of an episode. Defaults to 1000.
+            action_repeat: How many repeated actions to take per environment
+                step. Defaults to 1.
+            auto_reset: Whether to automatically reset the environment when
+                an episode ends. Defaults to True.
+            homogenisation_method: Method to homogenise observations and actions
+                across agents. If None, no homogenisation is performed, and
+                observations and actions are returned as is. If "max", observations
+                and actions are homogenised by taking the maximum dimension across
+                all agents and zero-padding the rest. In this case, the index of the
+                agent is prepended to the observation as a one-hot vector. If "concat",
+                observations and actions are homogenised by masking the dimensions of
+                the other agents with zeros in the full observation and action vectors.
+                Defaults to None.
+            agent_obs_mapping: Mapping from agent name to a list of indices
+                specifying which elements of the global Brax observation vector
+                are visible to that agent.
+            agent_action_mapping: Mapping from agent name to a list of indices
+                specifying which joints (action dimensions) of the global Brax
+                environment are controlled by that agent.
+
+        """
+        warnings.warn(
+            "MABrax is deprecated currently due to Brax being deprecated. It needs updating to use MJX. "
+            "If you need these environments, please do consider submitting a PR to update them! If you want to use multi-agent Brax environments in the meantime, you can install an older version of JaxMARL (pre-0.2.0).",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        base_env_name = env_name.split("_")[0]
+        env = envs.create(
+            base_env_name,
+            episode_length,
+            action_repeat,
+            auto_reset,
+            backend=backend,
+            **kwargs,
+        )
+        self.env = env
+        self.episode_length = episode_length
+        self.action_repeat = action_repeat
+        self.auto_reset = auto_reset
+        self.homogenisation_method = homogenisation_method
+
+        if agent_action_mapping is None:
+            if env_name not in _agent_action_mapping:
+                raise ValueError(
+                    f"No action mapping defined for {env_name}. "
+                    "Provide agent_action_mapping instead."
+                )
+            agent_action_mapping = _agent_action_mapping[env_name]
+
+        if agent_obs_mapping is None:
+            if env_name not in _agent_observation_mapping:
+                raise ValueError(
+                    f"No observation mapping defined for {env_name}. "
+                    "Provide agent_obs_mapping instead."
+                )
+            agent_obs_mapping = _agent_observation_mapping[env_name]
+
+        self.agent_obs_mapping = agent_obs_mapping
+        self.agent_action_mapping = agent_action_mapping
+
+        self.agents = list(self.agent_obs_mapping.keys())
+
+        self.num_agents = len(self.agent_obs_mapping)
+        obs_sizes = {
+            agent: self.num_agents
+            + max([o.size for o in self.agent_obs_mapping.values()])
+            if homogenisation_method == "max"
+            else self.env.observation_size
+            if homogenisation_method == "concat"
+            else obs.size
+            for agent, obs in self.agent_obs_mapping.items()
+        }
+        act_sizes = {
+            agent: max([a.size for a in self.agent_action_mapping.values()])
+            if homogenisation_method == "max"
+            else self.env.action_size
+            if homogenisation_method == "concat"
+            else act.size
+            for agent, act in self.agent_action_mapping.items()
+        }
+
+        self.observation_spaces = {
+            agent: spaces.Box(
+                -jnp.inf,
+                jnp.inf,
+                shape=(obs_sizes[agent],),  # type: ignore[arg-type]
+            )
+            for agent in self.agents
+        }
+        self.action_spaces = {
+            agent: spaces.Box(
+                -1.0,
+                1.0,
+                shape=(act_sizes[agent],),
+            )
+            for agent in self.agents
+        }
+
+    @partial(jax.jit, static_argnums=(0,))
+    def reset(self, key: PRNGKeyArray) -> Tuple[Observations, envs.State]:
+        state = self.env.reset(key)
+        return self.get_obs(state), state
+
+    @partial(jax.jit, static_argnums=(0,))
+    def step_env(
+        self,
+        key: PRNGKeyArray,
+        state: envs.State,
+        actions: Actions,
+    ) -> Tuple[Observations, envs.State, Rewards, Dones, Infos]:
+        global_action = self.map_agents_to_global_action(actions)
+        next_state = self.env.step(state, global_action)  # type: ignore
+        observations = self.get_obs(next_state)
+        rewards = {agent: next_state.reward for agent in self.agents}
+        rewards["__all__"] = next_state.reward
+        dones = {agent: next_state.done.astype(jnp.bool_) for agent in self.agents}
+        dones["__all__"] = next_state.done.astype(jnp.bool_)
+        return (
+            observations,
+            next_state,  # type: ignore
+            rewards,
+            dones,
+            next_state.info,
+        )
+
+    def get_obs(self, state: envs.State) -> Observations:
+        """Extracts agent observations from the global state.
+
+        Args:
+            state: Global state of the environment.
+
+        Returns:
+            A dictionary of observations for each agent.
+        """
+        return self.map_global_obs_to_agents(state.obs)
+
+    def map_agents_to_global_action(
+        self, agent_actions: Dict[str, jnp.ndarray]
+    ) -> jnp.ndarray:
+        global_action = jnp.zeros(self.env.action_size)
+        for agent_name, action_indices in self.agent_action_mapping.items():
+            if self.homogenisation_method == "max":
+                global_action = global_action.at[action_indices].set(
+                    agent_actions[agent_name][: action_indices.size]
+                )
+            elif self.homogenisation_method == "concat":
+                global_action = global_action.at[action_indices].set(
+                    agent_actions[agent_name][action_indices]
+                )
+            else:
+                global_action = global_action.at[action_indices].set(
+                    agent_actions[agent_name]
+                )
+        return global_action
+
+    def map_global_obs_to_agents(
+        self, global_obs: jnp.ndarray
+    ) -> Dict[str, jnp.ndarray]:
+        """Maps the global observation vector to the individual agent observations.
+
+        Args:
+            global_obs: The global observation vector.
+
+        Returns:
+            A dictionary mapping agent names to their observations. The mapping method
+            is determined by the homogenisation_method parameter.
+        """
+        agent_obs = {}
+        for agent_idx, (agent_name, obs_indices) in enumerate(
+            self.agent_obs_mapping.items()
+        ):
+            if self.homogenisation_method == "max":
+                # Vector with the agent idx one-hot encoded as the first num_agents
+                # elements and then the agent's own observations (zero padded to
+                # the size of the largest agent observation vector)
+                agent_obs[agent_name] = (
+                    jnp.zeros(
+                        self.num_agents
+                        + max([v.size for v in self.agent_obs_mapping.values()])
+                    )
+                    .at[agent_idx]
+                    .set(1)
+                    .at[agent_idx + 1 : agent_idx + 1 + obs_indices.size]
+                    .set(global_obs[obs_indices])
+                )
+            elif self.homogenisation_method == "concat":
+                # Zero vector except for the agent's own observations
+                # (size of the global observation vector)
+                agent_obs[agent_name] = (
+                    jnp.zeros(global_obs.shape)
+                    .at[obs_indices]
+                    .set(global_obs[obs_indices])
+                )
+            else:
+                # Just agent's own observations
+                agent_obs[agent_name] = global_obs[obs_indices]
+        return agent_obs
+
+    @property
+    def sys(self):
+        return self.env.sys
+
+
+class Ant(MABraxEnv):
+    def __init__(self, **kwargs):
+        super().__init__("ant_4x2", **kwargs)
+
+
+class HalfCheetah(MABraxEnv):
+    def __init__(self, **kwargs):
+        super().__init__("halfcheetah_6x1", **kwargs)
+
+
+class Hopper(MABraxEnv):
+    def __init__(self, **kwargs):
+        super().__init__("hopper_3x1", **kwargs)
+
+
+class Humanoid(MABraxEnv):
+    def __init__(self, **kwargs):
+        super().__init__("humanoid_9|8", **kwargs)
+
+
+class Walker2d(MABraxEnv):
+    def __init__(self, **kwargs):
+        super().__init__("walker2d_2x3", **kwargs)
